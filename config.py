@@ -31,6 +31,8 @@ class Settings:
     ku_llm_api_key: str = field(repr=False)
     ku_llm_base_url: str
     ku_llm_model: str
+    # Empty until the staging target exists. The Target client must refuse to send while it is empty.
+    staging_target_url: str
 
 
 @lru_cache(maxsize=1)
@@ -39,4 +41,5 @@ def get_settings() -> Settings:
         ku_llm_api_key=_require("KU_LLM_API_KEY"),
         ku_llm_base_url=_require("KU_LLM_BASE_URL"),
         ku_llm_model=os.getenv("KU_LLM_MODEL", "claude-opus-5").strip(),
+        staging_target_url=os.getenv("STAGING_TARGET_URL", "").strip(),
     )
