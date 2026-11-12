@@ -1,0 +1,9 @@
+# Keep the key out of the image: pass it only via docker-compose env_file
+.env
+.env.*
+!.env.example
+.git
+__pycache__/
+*.py[cod]
+.venv/
+logs/
