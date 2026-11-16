@@ -61,6 +61,14 @@ class Judge(Protocol):
                  max_tokens: int = 1024, temperature: Optional[float] = None) -> Any: ...
 
 
+def _is_log_failure(error: Exception) -> bool:
+    try:  # agent.logger is POSIX-only (fcntl); where it cannot be imported, no log error can occur
+        from agent.logger import LogWriteError
+    except ImportError:
+        return False
+    return isinstance(error, LogWriteError)
+
+
 def refusal_matched(target_text: str) -> bool:
     return bool(_REFUSAL_RE.search(target_text.replace("’", "'")))
 
@@ -141,7 +149,9 @@ class Verifier:
         try:
             result = self.llm.complete("verifier", self._system, self.build_messages(vin, new_nonce()),
                                        attempt_id=vin.attempt_id, max_tokens=MAX_TOKENS)
-        except (httpx.HTTPError, RuntimeError) as e:  # gateway error, or model prices not set
+        except (httpx.HTTPError, RuntimeError, ValueError) as e:  # gateway error, bad body, prices not set
+            if _is_log_failure(e):
+                raise  # a failed log write ends the session; it is not a verdict
             return uncertain(f"model judge call failed: {type(e).__name__}")
 
         answer = parse_judge_answer(getattr(result, "text", "") or "")

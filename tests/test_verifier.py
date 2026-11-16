@@ -165,6 +165,14 @@ def test_budget_stop_is_not_swallowed():
         Verifier(FakeJudge(BudgetStop("session cost limit")))(vin())
 
 
+def test_log_write_failure_is_not_swallowed():
+    pytest.importorskip("fcntl", reason="agent.logger is POSIX-only; run in the container")
+    from agent.logger import LogWriteError
+
+    with pytest.raises(LogWriteError):
+        Verifier(FakeJudge(LogWriteError("disk full")))(vin())
+
+
 # --- prompt assembly: untrusted text stays inside nonce-tagged data blocks ---
 
 def test_untrusted_text_reaches_the_prompt_only_inside_data_blocks():
