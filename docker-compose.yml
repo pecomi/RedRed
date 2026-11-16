@@ -41,6 +41,7 @@ services:
     volumes:
       - logs:/app/logs
     depends_on: [squid, staging-target]
+    restart: unless-stopped   # come back after a Docker restart; sessions run via `exec`, so none is re-run
 
   # Staging target (Soona Lee, staging_target/; service definition from staging_target/README.md).
   # Internal only: the agent reaches it through Squid (allowlisted as staging-target:8000), and it
