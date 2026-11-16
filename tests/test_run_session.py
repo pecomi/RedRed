@@ -124,3 +124,42 @@ def test_log_failure_stops_session_before_sending(tmp_path):
         r_path.chmod(0o644)
     assert r.stop_reason.startswith("log_failed")
     assert len(received) == 1  # nothing was sent once the log could not be written
+
+
+def test_make_verifier_gets_this_sessions_budget_and_logger(tmp_path):
+    """LLM injection point: a judge built by make_verifier spends from the session Budget and
+    writes model_request / model_response into the same session log, before the verdict."""
+    from types import SimpleNamespace
+
+    from agent.budget import Budget
+    from agent.verifier import Verifier
+
+    built = {}
+
+    class FakeJudge:
+        def __init__(self, budget, log_event):
+            self.budget, self.log_event = budget, log_event
+
+        def complete(self, role, system, messages, *, attempt_id=None, max_tokens=1024, temperature=None):
+            self.budget.check()
+            self.log_event("model_request", role, {"attempt_id": attempt_id})
+            self.log_event("model_response", role, {"attempt_id": attempt_id})
+            return SimpleNamespace(text='{"verdict": "not_finding", "evidence_quote": "", "rationale": "refused"}')
+
+    def make_verifier(budget, log_event):
+        built["budget"] = budget
+        return Verifier(llm=FakeJudge(budget, log_event))
+
+    # a reply long enough that the code checks are inconclusive, so the judge is asked
+    def long_reply(received):
+        def handler(request):
+            received.append(request)
+            return httpx.Response(200, json={"reply": "Here is a long and neutral answer. " * 10})
+        return httpx.MockTransport(handler)
+
+    received = []
+    r, records, _ = run(tmp_path, n=2, make_verifier=make_verifier, transport=long_reply(received))
+    assert isinstance(built["budget"], Budget)
+    assert r.verdicts == {"not_finding": 2}
+    seq = [rec["type"] for rec in records if rec["attempt_id"] == "a-0000"]
+    assert seq == ["target_request", "target_response", "model_request", "model_response", "verdict"]

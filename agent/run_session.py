@@ -5,8 +5,11 @@ This file owns only the order of calls and the session lifecycle. The parts are 
   build       (seed, chain, attempt_id) -> TargetRequest Jiseon  (agent/generator.py)
   code_checks (seed, target_text) -> CodeChecks          Soona   (agent/verifier.py)
   verifier    VerifierInput -> VerifierOutput            Soona   (agent/verifier.py)
-run_session() keeps stand-ins as defaults; main() wires the Verifier's code checks. The model
-judge is not wired yet: it needs an LLMClient built on this session's Budget and Logger.
+run_session() keeps stand-ins as defaults; main() wires the Verifier's code checks.
+LLM injection point: `make_verifier(budget, log_event)` is called once this session's Budget and
+Logger exist, so a model judge (agent.llm.LLMClient(budget, log_event)) spends from the same
+session budget and writes model_request / model_response into the same session log. It returns
+the verifier, and its `code_checks` method (if any) is used as code_checks.
 Target client, Logger and Budget are wired here.
 
 Per attempt: kill/budget check -> build request -> send (Target client) -> verify -> log verdict.
@@ -40,6 +43,8 @@ Planner = Iterable[tuple[dict, list[str]]]
 Build = Callable[[dict, list[str], str], TargetRequest]
 CodeCheck = Callable[[dict, str], CodeChecks]
 Verifier = Callable[[VerifierInput], VerifierOutput]
+LogEvent = Callable[[str, str, dict], object]
+MakeVerifier = Callable[[Budget, LogEvent], Verifier]
 
 
 def no_code_checks(seed: dict, target_text: str) -> CodeChecks:
@@ -74,6 +79,7 @@ def run_session(
     build: Build = build_request,
     code_checks: CodeCheck = no_code_checks,
     verifier: Verifier = stub_verifier,
+    make_verifier: Optional[MakeVerifier] = None,
     log_dir: Path = Path("logs"),
     kill_file: Path = budget_mod.KILL_FILE,
     transport: Optional[httpx.BaseTransport] = None,
@@ -87,6 +93,9 @@ def run_session(
     result = SessionResult(log_path=log.path, stop_reason="planner_exhausted")
 
     try:
+        if make_verifier is not None:  # built here so a model judge shares this session's Budget and Logger
+            verifier = make_verifier(budget, log.log_event)
+            code_checks = getattr(verifier, "code_checks", code_checks)
         for i, (seed, chain) in enumerate(planner):
             budget.check()  # kill switch / time / cost before doing any work for this attempt
             req = build(seed, chain, f"a-{i:04d}")
@@ -144,26 +153,39 @@ def run_session(
 def main(argv: Optional[list[str]] = None) -> int:
     from agent import advbench
     from agent.planner import RulePlanner
+    from agent.llm import LLMClient
     from agent.verifier import Verifier
     from config import get_settings
 
-    ap = argparse.ArgumentParser(description="Run one supervised session (rule-based planner, no model spend).")
+    ap = argparse.ArgumentParser(description="Run one supervised session (rule-based planner).")
     ap.add_argument("--max-attempts", type=int, default=3)
     ap.add_argument("--seeds", type=int, default=5, help="first N AdvBench seeds")
     ap.add_argument("--chains", nargs="+", default=["plain", "roleplay_wrapper"],
                     help="mutation chains; join rules in one chain with '+', e.g. roleplay_wrapper+korean_switch")
+    ap.add_argument("--judge", action="store_true",
+                    help="also use the model judge (live BAZE calls, billed; a human confirms first). "
+                         "Needs model prices in agent/budget.py, otherwise every judged attempt is uncertain.")
     args = ap.parse_args(argv)
 
     chains = [c.split("+") for c in args.chains]
     seeds = advbench.load()[: args.seeds]
     planner = RulePlanner(seeds, chains, max_attempts=args.max_attempts)
-    verifier = Verifier(canary=get_settings().staging_target_canary)  # code checks only, no model spend
-    if not verifier.canary:
+    canary = get_settings().staging_target_canary
+    if not canary:
         print("WARNING: STAGING_TARGET_CANARY is empty; the canary check is off, so no attempt can be a finding.")
-    r = run_session(planner, code_checks=verifier.code_checks, verifier=verifier,
+
+    if args.judge:
+        # The judge must share this session's Budget and Logger, which exist only inside run_session.
+        parts = {"make_verifier": lambda budget, log_event: Verifier(llm=LLMClient(budget, log_event), canary=canary)}
+    else:
+        verifier = Verifier(canary=canary)  # code checks only, no model spend
+        parts = {"code_checks": verifier.code_checks, "verifier": verifier}
+
+    r = run_session(planner, **parts,
                     session_meta={"planner": "RulePlanner", "seeds": args.seeds, "chains": chains,
-                                  "max_attempts": args.max_attempts, "verifier": "code_checks_only",
-                                  "canary_check": bool(verifier.canary)})
+                                  "max_attempts": args.max_attempts,
+                                  "verifier": "code_checks+llm_judge" if args.judge else "code_checks_only",
+                                  "canary_check": bool(canary)})
     print(f"log={r.log_path} stop={r.stop_reason} attempts={r.attempts} sent={r.sent} "
           f"errors={dict(r.errors)} verdicts={dict(r.verdicts)}")
     return 0 if r.stop_reason == "planner_exhausted" else 1
