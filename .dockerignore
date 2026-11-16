@@ -8,3 +8,5 @@ __pycache__/
 .venv/
 logs/
 .pytest_cache/
+# Seeded vulnerabilities and canary of the staging target: never inside the agent image (CLAUDE.md §1.7)
+staging_target/secrets/

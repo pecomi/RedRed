@@ -40,11 +40,17 @@ services:
     tmpfs: ["/tmp"]
     volumes:
       - logs:/app/logs
-    depends_on: [squid]
+    depends_on: [squid, staging-target]
 
-  # Staging target (Soona Lee, staging_target/). Uncomment once staging_target/Dockerfile exists.
-  # It must stay on `internal` only: the agent reaches it through Squid, and it has no route out.
-  # staging-target:
-  #   build: ./staging_target
-  #   networks: [internal]
-  #   expose: ["8000"]
+  # Staging target (Soona Lee, staging_target/; service definition from staging_target/README.md).
+  # Internal only: the agent reaches it through Squid (allowlisted as staging-target:8000), and it
+  # has no route out. Not published on the host; use `docker compose exec staging-target ...`.
+  staging-target:
+    build: ./staging_target
+    networks: [internal]
+    expose: ["8000"]
+    read_only: true
+    user: "10002:10002"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
