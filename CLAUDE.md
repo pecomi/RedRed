@@ -38,6 +38,7 @@ Map each box in the Proposal §1 diagram one-to-one to files. Update this table 
 | Prompt assembly (data/instruction separation) | `agent/prompt_assembly.py` | Jiseon Kim |
 | Budget / kill switch | `agent/budget.py` | Jiseon Kim |
 | Target client | `agent/target_client.py` | Hyeyoung You |
+| Session runner (call order, session lifecycle, stop conditions; parts injected) | `agent/run_session.py` | Hyeyoung You |
 | Verifier | `agent/verifier.py`, `prompts/verifier.md` | Soona Lee |
 | Logger | `agent/logger.py` | Soona Lee |
 | Sandbox / egress | `docker-compose.yml`, `infra/squid/`, `infra/agent/Dockerfile`, `tests/smoke.sh`, `tests/seam1_egress.sh` | Hyeyoung You |
