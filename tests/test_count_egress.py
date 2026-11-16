@@ -58,3 +58,16 @@ def test_tampered_log_breaks_chain(tmp_path, capsys):
     agent_log.write_text("".join(lines))
     assert ce.main(args) == 1
     assert json.loads(capsys.readouterr().out)["chain_ok"] is False
+
+
+def test_mismatches_in_two_sessions_cannot_cancel_out(tmp_path, capsys):
+    # Session A: a response with no request; session B: a request with no response.
+    # The totals match (1 == 1), but each session is wrong on its own.
+    args = write(tmp_path, events=("target_response",))
+    (tmp_path / "a").mkdir()
+    a_args = write(tmp_path / "a", events=("target_request",))
+    args[args.index("--agent") + 1 : args.index("--agent") + 2] = [str(tmp_path / "s.jsonl"), a_args[3]]
+    assert ce.main(args) == 1
+    r = json.loads(capsys.readouterr().out)
+    assert r["target_request"] == r["target_response"] == 1
+    assert r["sent_eq_logged"] is False and len(r["sessions_mismatched"]) == 2

@@ -5,8 +5,9 @@ Reads every Squid access.log and every agent JSONL session log, then prints one 
                       Counted conservatively: any non-TCP_DENIED entry counts, even a failed connect.
   egress_denied       Target client refusals (bad path / host) from the agent logs.
   squid_denied        TCP_DENIED entries in the Squid logs.
-  sent==logged        target_request records == target_response records (every logged request
-                      got its outcome logged; a send never happens without a target_request first).
+  sent==logged        in every session file, target_request records == target_response records
+                      (every logged request got its outcome logged; a send never happens without
+                      a target_request first). Checked per session, not on the totals.
   squid_target        non-denied Squid entries to the staging target; should equal the logged count.
   chain_ok            every agent JSONL passes agent.logger.verify_chain (seq, session_id, hash chain).
                       A tampered or truncated log makes every other agent-side number untrustworthy.
@@ -66,16 +67,23 @@ def count_squid(paths: list[str]) -> dict:
 
 
 def count_agent(paths: list[str]) -> dict:
-    c = {"egress_denied": 0, "target_request": 0, "target_response": 0}
+    """Totals across files, plus the sent==logged check per file (one file = one session),
+    so a surplus in one session cannot hide a shortfall in another."""
+    c = {"egress_denied": 0, "target_request": 0, "target_response": 0, "sessions_mismatched": []}
     for path in paths:
+        per = {"target_request": 0, "target_response": 0}
         with open(path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
                 t = json.loads(line).get("type")
+                if t in per:
+                    per[t] += 1
                 if t in c:
                     c[t] += 1
+        if per["target_request"] != per["target_response"]:
+            c["sessions_mismatched"].append(f"{path}: {per['target_request']} requests, {per['target_response']} responses")
     return c
 
 
@@ -103,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     squid_files, agent_files = files(args.squid), files(args.agent)
     r = {**count_squid(squid_files), **count_agent(agent_files), **check_chains(agent_files)}
-    r["sent_eq_logged"] = r["target_request"] == r["target_response"]
+    r["sent_eq_logged"] = not r["sessions_mismatched"]
     r["files"] = {"squid": len(squid_files), "agent": len(agent_files)}
 
     if args.json:
@@ -121,6 +129,8 @@ def main(argv: list[str] | None = None) -> int:
         print("warning: no Squid access.log found; run scripts/collect_logs.sh first", file=sys.stderr)
     for err in r["chain_errors"]:
         print(f"chain: {err}", file=sys.stderr)
+    for err in r["sessions_mismatched"]:
+        print(f"sent!=logged: {err}", file=sys.stderr)
     return 1 if r["reached_non_target"] or not r["sent_eq_logged"] or r["chain_ok"] is False else 0
 
 
