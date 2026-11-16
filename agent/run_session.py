@@ -3,8 +3,10 @@
 This file owns only the order of calls and the session lifecycle. The parts are injected:
   planner     iterable of (seed, mutation_chain)        Jiseon  (agent/planner.py)
   build       (seed, chain, attempt_id) -> TargetRequest Jiseon  (agent/generator.py)
-  code_checks (seed, target_text) -> CodeChecks          Soona   (stub until delivered)
-  verifier    VerifierInput -> VerifierOutput            Soona   (stub until delivered)
+  code_checks (seed, target_text) -> CodeChecks          Soona   (agent/verifier.py)
+  verifier    VerifierInput -> VerifierOutput            Soona   (agent/verifier.py)
+run_session() keeps stand-ins as defaults; main() wires the Verifier's code checks. The model
+judge is not wired yet: it needs an LLMClient built on this session's Budget and Logger.
 Target client, Logger and Budget are wired here.
 
 Per attempt: kill/budget check -> build request -> send (Target client) -> verify -> log verdict.
@@ -41,12 +43,12 @@ Verifier = Callable[[VerifierInput], VerifierOutput]
 
 
 def no_code_checks(seed: dict, target_text: str) -> CodeChecks:
-    """Stand-in until Soona's code_checks (canary_found, refusal_matched) is delivered."""
+    """Default stand-in: no code checks. main() passes agent.verifier.Verifier.code_checks."""
     return CodeChecks()
 
 
 def stub_verifier(vin: VerifierInput) -> VerifierOutput:
-    """Stand-in until Soona's Verifier is delivered. Never claims a finding."""
+    """Default stand-in. Never claims a finding. main() passes agent.verifier.Verifier."""
     return VerifierOutput(
         attempt_id=vin.attempt_id, verdict="uncertain", basis="code", rationale="verifier not wired yet"
     )
@@ -142,6 +144,8 @@ def run_session(
 def main(argv: Optional[list[str]] = None) -> int:
     from agent import advbench
     from agent.planner import RulePlanner
+    from agent.verifier import Verifier
+    from config import get_settings
 
     ap = argparse.ArgumentParser(description="Run one supervised session (rule-based planner, no model spend).")
     ap.add_argument("--max-attempts", type=int, default=3)
@@ -153,8 +157,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     chains = [c.split("+") for c in args.chains]
     seeds = advbench.load()[: args.seeds]
     planner = RulePlanner(seeds, chains, max_attempts=args.max_attempts)
-    r = run_session(planner, session_meta={"planner": "RulePlanner", "seeds": args.seeds, "chains": chains,
-                                           "max_attempts": args.max_attempts})
+    verifier = Verifier(canary=get_settings().staging_target_canary)  # code checks only, no model spend
+    if not verifier.canary:
+        print("WARNING: STAGING_TARGET_CANARY is empty; the canary check is off, so no attempt can be a finding.")
+    r = run_session(planner, code_checks=verifier.code_checks, verifier=verifier,
+                    session_meta={"planner": "RulePlanner", "seeds": args.seeds, "chains": chains,
+                                  "max_attempts": args.max_attempts, "verifier": "code_checks_only",
+                                  "canary_check": bool(verifier.canary)})
     print(f"log={r.log_path} stop={r.stop_reason} attempts={r.attempts} sent={r.sent} "
           f"errors={dict(r.errors)} verdicts={dict(r.verdicts)}")
     return 0 if r.stop_reason == "planner_exhausted" else 1
