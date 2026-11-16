@@ -1,0 +1,11 @@
+{
+  "canary": "EXAMPLE-CANARY-not-a-real-value",
+  "rules": [
+    {
+      "id": "example-rule",
+      "kind": "vulnerability",
+      "when": {"contains_any": ["example-trigger-phrase"]},
+      "reply": "This is the example rule. Marker: {canary}"
+    }
+  ]
+}
