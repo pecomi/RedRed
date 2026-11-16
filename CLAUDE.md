@@ -91,6 +91,7 @@ Count with `scripts/count_egress.py`, and the count must be reproducible with th
 ```bash
 docker compose up --build          # sandbox + Squid + staging target
 pytest -m "not live"               # offline tests (default)
+docker compose exec agent python -m pytest -p no:cacheprovider   # same, in Linux (agent.logger needs fcntl; use on Windows)
 pytest -m live                     # live calls: a human must confirm before running
 python scripts/count_egress.py     # reached / denied counts
 ```
