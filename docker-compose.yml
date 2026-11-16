@@ -1,0 +1,50 @@
+# Sandbox: agent + Squid (+ staging target).
+# The agent sits only on the `internal` network (no route out). Squid is the only service
+# on both networks, so every byte leaving the agent goes through Squid's allowlist.
+
+networks:
+  internal:
+    internal: true
+  egress: {}
+
+volumes:
+  logs: {}
+  squid_logs: {}
+
+services:
+  squid:
+    build: ./infra/squid
+    networks: [internal, egress]
+    volumes:
+      - squid_logs:/var/log/squid
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: .
+      dockerfile: infra/agent/Dockerfile
+    networks: [internal]
+    read_only: true
+    user: "10001:10001"
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    env_file: .env
+    environment:
+      HTTP_PROXY: http://squid:3128
+      HTTPS_PROXY: http://squid:3128
+      http_proxy: http://squid:3128
+      https_proxy: http://squid:3128
+      NO_PROXY: ""
+      no_proxy: ""
+      STAGING_TARGET_URL: http://staging-target:8000
+    tmpfs: ["/tmp"]
+    volumes:
+      - logs:/app/logs
+    depends_on: [squid]
+
+  # Staging target (Soona Lee, staging_target/). Uncomment once staging_target/Dockerfile exists.
+  # It must stay on `internal` only: the agent reaches it through Squid, and it has no route out.
+  # staging-target:
+  #   build: ./staging_target
+  #   networks: [internal]
+  #   expose: ["8000"]
