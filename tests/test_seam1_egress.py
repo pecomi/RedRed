@@ -32,6 +32,7 @@ def settings(monkeypatch):
 def test_a_host_smuggling_path_is_denied_and_logged(settings, path):
     events, sent = [], []
     client = tc.TargetClient(
+        lambda: None,
         lambda t, a, d: events.append((t, d)) or True,
         transport=httpx.MockTransport(lambda r: sent.append(r) or httpx.Response(200)),
     )

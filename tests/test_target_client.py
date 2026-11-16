@@ -19,6 +19,10 @@ def settings(monkeypatch):
     config.get_settings.cache_clear()
 
 
+def no_budget_limit():
+    return None
+
+
 def make(handler=None, *, log_ok=True, budget=None):
     events, sent = [], []
 
@@ -33,7 +37,7 @@ def make(handler=None, *, log_ok=True, budget=None):
         return (handler or (lambda r: httpx.Response(200, json={"reply": "ok", "conversation_id": "c-1"})))(request)
 
     client = tc.TargetClient(
-        log_event, budget or tc.stub_budget_check, transport=httpx.MockTransport(transport_handler)
+        budget or no_budget_limit, log_event, transport=httpx.MockTransport(transport_handler)
     )
     return client, events, sent
 
@@ -100,7 +104,7 @@ def test_logger_exception_counts_as_log_failure():
     def boom(*_):
         raise OSError("disk full")
 
-    client = tc.TargetClient(boom, transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    client = tc.TargetClient(no_budget_limit, boom, transport=httpx.MockTransport(lambda r: httpx.Response(200)))
     assert client.send(req()).error == "log_failed"
 
 
@@ -116,6 +120,17 @@ def test_http_error_and_timeout_are_logged():
     client, events, _ = make(slow)
     assert client.send(req()).error == "timeout"
     assert events == ["target_request", "target_response"]
+
+
+def test_default_logger_without_session_fails_closed(tmp_path, monkeypatch):
+    pytest.importorskip("fcntl", reason="agent.logger is POSIX-only; runs in the container")
+    from agent import logger
+
+    monkeypatch.setattr(logger, "_default", logger.Logger(tmp_path / "no-session.jsonl"))
+    sent = []
+    client = tc.TargetClient(no_budget_limit, transport=httpx.MockTransport(lambda r: sent.append(r) or httpx.Response(200)))
+    assert client.send(req()).error == "log_failed"
+    assert sent == []
 
 
 def test_budget_adapter_converts_budget_stop(tmp_path):

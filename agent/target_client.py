@@ -10,6 +10,10 @@
 - Inside the sandbox, httpx follows HTTP_PROXY from docker-compose, so traffic goes through Squid.
   The agent container has no other route out, so a missing proxy setting fails closed.
 - CLIENT_COUNTER counts every send that was actually attempted (seam 3: sent == logged).
+- Logging defaults to agent.logger.log_event, which needs start_session() first; until then
+  every write fails, so nothing is sent (fail closed). budget_check has no default on purpose.
+- When a Budget built with the same logger runs out, budget_stop is recorded twice: once by
+  Budget (session level) and once here (attempt level, with attempt_id). Counts are unaffected.
 """
 from __future__ import annotations
 
@@ -27,23 +31,13 @@ from schemas.target_io import TargetRequest, TargetResponse
 ALLOWED_METHODS = ("GET", "POST")
 _FORBIDDEN_IN_PATH = ("//", "://", "@", "\\")
 
-# Logger interface: log_event(type, actor, data). The real Logger returns the record and raises
-# on failure; the kickoff stub returns True/False. Both are handled: raise or False = failed.
+# Logger interface: log_event(type, actor, data). agent.logger returns the record and raises
+# LogWriteError on failure. A raise or a False return both count as a failed write.
 LogEvent = Callable[[str, str, dict], object]
 # Returns a reason string when the budget is exhausted, otherwise None.
 BudgetCheck = Callable[[], Optional[str]]
 
 CLIENT_COUNTER = 0
-
-
-def stub_log_event(type_: str, actor: str, data: dict) -> bool:
-    """Stand-in until agent/logger.py is wired in: print only, always succeed."""
-    print(json.dumps({"type": type_, "actor": actor, "data": data}, ensure_ascii=False))
-    return True
-
-
-def stub_budget_check() -> Optional[str]:
-    return None
 
 
 def budget_check_from(budget: Budget) -> BudgetCheck:
@@ -108,13 +102,17 @@ def _logged(log_event: LogEvent, type_: str, data: dict) -> bool:
 class TargetClient:
     def __init__(
         self,
-        log_event: LogEvent = stub_log_event,
-        budget_check: BudgetCheck = stub_budget_check,
+        budget_check: BudgetCheck,
+        log_event: Optional[LogEvent] = None,
         *,
         transport: Optional[httpx.BaseTransport] = None,
         timeout: float = 30.0,
     ) -> None:
         self._base_url = get_settings().staging_target_url
+        if log_event is None:
+            # Imported here, not at module level: agent.logger needs fcntl (POSIX only),
+            # and offline tests of this module also run on Windows.
+            from agent.logger import log_event
         self._log = log_event
         self._budget_check = budget_check
         self._http = httpx.Client(timeout=timeout, transport=transport, follow_redirects=False)
