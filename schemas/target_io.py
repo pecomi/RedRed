@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 Method = Literal["GET", "POST"]
-TargetError = Literal["timeout", "http_error", "blocked_path", "budget_exceeded"]
+# log_failed: the target_request log write failed, so the request was not sent (added for the Target client).
+TargetError = Literal["timeout", "http_error", "blocked_path", "budget_exceeded", "log_failed"]
 
 
 @dataclass(frozen=True)
