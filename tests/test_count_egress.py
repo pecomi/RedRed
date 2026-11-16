@@ -1,6 +1,13 @@
 import json
 
+import pytest
+
 from scripts import count_egress as ce
+
+try:
+    from agent.logger import Logger
+except ImportError:  # agent.logger needs fcntl (POSIX); on Windows write plain lines instead
+    Logger = None
 
 SQUID = """\
 1763270000.001     12 172.20.0.3 TCP_TUNNEL/200 5120 CONNECT api.baze.co:443 - HIER_DIRECT/1.2.3.4 -
@@ -12,8 +19,15 @@ SQUID = """\
 
 def write(tmp_path, squid=SQUID, events=("target_request", "target_response", "egress_denied")):
     (tmp_path / "access.log").write_text(squid)
-    (tmp_path / "s.jsonl").write_text("".join(json.dumps({"type": t}) + "\n" for t in events))
-    return ["--squid", str(tmp_path / "access.log"), "--agent", str(tmp_path / "s.jsonl"), "--json"]
+    agent_log = tmp_path / "s.jsonl"
+    if Logger:
+        log = Logger(agent_log)
+        log.start_session()
+        for t in events:
+            log.log_event(t, "target_client", {"attempt_id": "a-0001"})
+    else:
+        agent_log.write_text("".join(json.dumps({"type": t}) + "\n" for t in events))
+    return ["--squid", str(tmp_path / "access.log"), "--agent", str(agent_log), "--json"]
 
 
 def test_clean_logs_report_zero_reached(tmp_path, capsys):
@@ -21,6 +35,7 @@ def test_clean_logs_report_zero_reached(tmp_path, capsys):
     r = json.loads(capsys.readouterr().out)
     assert r["reached_non_target"] == 0 and r["squid_denied"] == 2
     assert r["egress_denied"] == 1 and r["sent_eq_logged"] and r["squid_target"] == 1
+    assert r["chain_ok"] is (True if Logger else None)
 
 
 def test_non_denied_entry_to_other_host_counts_as_reached(tmp_path, capsys):
@@ -32,3 +47,14 @@ def test_non_denied_entry_to_other_host_counts_as_reached(tmp_path, capsys):
 def test_unanswered_request_fails_sent_eq_logged(tmp_path, capsys):
     assert ce.main(write(tmp_path, events=("target_request",))) == 1
     assert json.loads(capsys.readouterr().out)["sent_eq_logged"] is False
+
+
+@pytest.mark.skipif(Logger is None, reason="agent.logger is POSIX-only; runs in the container")
+def test_tampered_log_breaks_chain(tmp_path, capsys):
+    args = write(tmp_path)
+    agent_log = tmp_path / "s.jsonl"
+    lines = agent_log.read_text().splitlines(keepends=True)
+    del lines[1]  # drop one record, e.g. a target_request someone wanted to hide
+    agent_log.write_text("".join(lines))
+    assert ce.main(args) == 1
+    assert json.loads(capsys.readouterr().out)["chain_ok"] is False

@@ -27,10 +27,17 @@ else bad "(1) LLM API not reachable: $out"; fi
 # (2) Staging target through the Target client
 if $DC ps --services --status running | grep -qx staging-target; then
   if out=$($DC exec -T agent python - <<'PY' 2>&1
-from agent.target_client import TargetClient
+import time
+from agent.budget import Budget
+from agent.logger import Logger
+from agent.target_client import TargetClient, budget_check_from
 from schemas.target_io import TargetRequest
-r = TargetClient().send(TargetRequest(attempt_id="smoke-0001", path="/chat", body={"message": "hello"}))
-print(r.status, r.error)
+log = Logger(f"logs/smoke-{time.strftime('%Y%m%dT%H%M%S')}.jsonl")
+log.start_session(data={"run": "smoke"})
+client = TargetClient(budget_check_from(Budget(log_event=log.log_event)), log.log_event)
+r = client.send(TargetRequest(attempt_id="smoke-0001", path="/chat", body={"message": "hello"}))
+log.log_event("session_end", "agent", {})
+print(r.status, r.error, log.path)
 raise SystemExit(0 if r.error is None else 1)
 PY
   ); then ok "(2) staging target POST /chat: $(echo "$out" | tail -1)"

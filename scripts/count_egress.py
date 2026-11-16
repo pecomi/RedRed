@@ -8,9 +8,13 @@ Reads every Squid access.log and every agent JSONL session log, then prints one 
   sent==logged        target_request records == target_response records (every logged request
                       got its outcome logged; a send never happens without a target_request first).
   squid_target        non-denied Squid entries to the staging target; should equal the logged count.
+  chain_ok            every agent JSONL passes agent.logger.verify_chain (seq, session_id, hash chain).
+                      A tampered or truncated log makes every other agent-side number untrustworthy.
+                      Needs a POSIX Python (agent.logger imports fcntl): run in WSL or a container.
 
 Usage: python scripts/count_egress.py [--squid GLOB ...] [--agent GLOB ...] [--json]
-Collect the logs first with scripts/collect_logs.sh. Exit code 1 if reached_non_target > 0 or sent != logged.
+Collect the logs first with scripts/collect_logs.sh.
+Exit code 1 if reached_non_target > 0, sent != logged, or a log chain is broken.
 """
 from __future__ import annotations
 
@@ -18,7 +22,10 @@ import argparse
 import glob
 import json
 import sys
+from pathlib import Path
 from urllib.parse import urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root, for agent.logger
 
 # Must match infra/squid/squid.conf
 LLM_HOSTS = {"api.baze.co"}
@@ -72,6 +79,21 @@ def count_agent(paths: list[str]) -> dict:
     return c
 
 
+def check_chains(paths: list[str]) -> dict:
+    """verify_chain() each file. chain_ok is None when agent.logger cannot be imported (Windows)."""
+    try:
+        from agent.logger import LogWriteError, verify_chain
+    except ImportError as e:
+        return {"chain_ok": None, "chain_errors": [f"not checked: {e}"]}
+    errors = []
+    for path in paths:
+        try:
+            verify_chain(path)
+        except LogWriteError as e:
+            errors.append(f"{path}: {e}")
+    return {"chain_ok": not errors, "chain_errors": errors}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--squid", nargs="+", default=["logs/squid/access.log*"])
@@ -80,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     squid_files, agent_files = files(args.squid), files(args.agent)
-    r = {**count_squid(squid_files), **count_agent(agent_files)}
+    r = {**count_squid(squid_files), **count_agent(agent_files), **check_chains(agent_files)}
     r["sent_eq_logged"] = r["target_request"] == r["target_response"]
     r["files"] = {"squid": len(squid_files), "agent": len(agent_files)}
 
@@ -92,11 +114,14 @@ def main(argv: list[str] | None = None) -> int:
             f"reached_non_target={r['reached_non_target']} egress_denied={r['egress_denied']} "
             f"squid_denied={r['squid_denied']} sent==logged={r['sent_eq_logged']} "
             f"(requests={r['target_request']}) squid_target==logged={target_check} "
+            f"chain_ok={'unchecked' if r['chain_ok'] is None else r['chain_ok']} "
             f"[files: squid={len(squid_files)} agent={len(agent_files)}]"
         )
     if not squid_files:
         print("warning: no Squid access.log found; run scripts/collect_logs.sh first", file=sys.stderr)
-    return 1 if r["reached_non_target"] or not r["sent_eq_logged"] else 0
+    for err in r["chain_errors"]:
+        print(f"chain: {err}", file=sys.stderr)
+    return 1 if r["reached_non_target"] or not r["sent_eq_logged"] or r["chain_ok"] is False else 0
 
 
 if __name__ == "__main__":
