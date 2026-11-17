@@ -13,10 +13,11 @@ MAX_TARGET_REQUESTS_PER_SESSION = 200  # retries count too
 MAX_SESSION_SECONDS = 30 * 60
 MAX_SESSION_COST_USD = 5.0
 
-# --- Model prices for claude-opus-5, USD per million tokens. Fill in from the BAZE price page.
-# Left as None on purpose: live model calls refuse to run until both are set (fail closed).
-PRICE_INPUT_USD_PER_MTOK: Optional[float] = None
-PRICE_OUTPUT_USD_PER_MTOK: Optional[float] = None
+# --- Model prices, USD per million tokens.
+# Anthropic's published claude-opus-5 rates (platform.claude.com, $5 / $25 per 1M tokens,
+# read 2026-11). Overestimating cost only trips the USD 5 cap earlier, never later.
+PRICE_INPUT_USD_PER_MTOK: Optional[float] = 5.0    # USD per 1M input tokens
+PRICE_OUTPUT_USD_PER_MTOK: Optional[float] = 25.0  # USD per 1M output tokens
 
 # --- Kill switch: the supervisor stops a running session by creating this file.
 KILL_FILE = Path("logs/KILL")
