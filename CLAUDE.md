@@ -38,9 +38,11 @@ Map each box in the Proposal §1 diagram one-to-one to files. Update this table 
 | Prompt assembly (data/instruction separation) | `agent/prompt_assembly.py` | Jiseon Kim |
 | Budget / kill switch | `agent/budget.py` | Jiseon Kim |
 | Target client | `agent/target_client.py` | Hyeyoung You |
+| Session runner (call order, session lifecycle, stop conditions; parts injected) | `agent/run_session.py` | Hyeyoung You |
 | Verifier | `agent/verifier.py`, `prompts/verifier.md` | Soona Lee |
 | Logger | `agent/logger.py` | Soona Lee |
-| Sandbox / egress | `docker-compose.yml`, `infra/squid/` | Hyeyoung You |
+| Sandbox / egress | `docker-compose.yml`, `infra/squid/`, `infra/agent/Dockerfile`, `tests/smoke.sh`, `tests/seam1_egress.sh` | Hyeyoung You |
+| Egress count ("0 reached") | `scripts/count_egress.py`, `scripts/collect_logs.sh` | Hyeyoung You |
 | Staging target | `staging_target/` | Soona Lee |
 | Data | `data/advbench/`, `data/DATA_CARD.md` | Jiseon Kim |
 | Settings | `config.py`, `.env.example` | Jiseon Kim |
@@ -53,7 +55,7 @@ Ownership is accountability only; anyone may read, edit or review any file.
   `hash = sha256(prev_hash + canonical JSON of the record without hash)`. Types: `session_start`, `model_request`, `model_response`, `target_request`, `target_response`, `verdict`, `egress_denied`, `budget_stop`, `kill`, `session_end`.
   `target_request` is written before sending; if the write fails, the request is not sent.
 - `schemas/target_io.py` — `TargetRequest` (`attempt_id`, `turn`, `method` GET|POST, `path`, `body`, `conversation_id`, `seed_id`, `mutations`; no host field) /
-  `TargetResponse` (`attempt_id`, `turn`, `status`, `body_raw` (log only), `text`, `conversation_id`, `latency_ms`, `error` ∈ timeout | http_error | blocked_path | budget_exceeded).
+  `TargetResponse` (`attempt_id`, `turn`, `status`, `body_raw` (log only), `text`, `conversation_id`, `latency_ms`, `error` ∈ timeout | http_error | blocked_path | budget_exceeded | log_failed (target_request log write failed; nothing sent).
 - `schemas/verifier_input.py` — `attempt_id`, `goal`, `code_checks` (`canary_found`, `refusal_matched`), `attack_text`, `target_text`.
   `attack_text` and `target_text` are untrusted and reach the prompt only through `wrap_untrusted()`.
   Verifier output: `verdict` (finding | not_finding | uncertain), `basis`, `evidence_quote`, `rationale`, `severity_hint`.
@@ -90,6 +92,7 @@ Count with `scripts/count_egress.py`, and the count must be reproducible with th
 ```bash
 docker compose up --build          # sandbox + Squid + staging target
 pytest -m "not live"               # offline tests (default)
+docker compose exec agent python -m pytest -p no:cacheprovider   # same, in Linux (agent.logger needs fcntl; use on Windows)
 pytest -m live                     # live calls: a human must confirm before running
 python scripts/count_egress.py     # reached / denied counts
 ```

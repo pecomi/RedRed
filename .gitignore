@@ -20,3 +20,9 @@ build/
 .idea/
 .vscode/
 .DS_Store
+
+# --- Runtime logs (agent JSONL, collected Squid logs) ---
+logs/
+
+# --- Staging target: seeded vulnerability rules and canary (never commit) ---
+staging_target/secrets/

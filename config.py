@@ -33,6 +33,11 @@ class Settings:
     ku_llm_model: str
     # Empty until the staging target exists. The Target client must refuse to send while it is empty.
     staging_target_url: str
+    # JSONL audit log. One file holds one session; start a new session with a new path.
+    log_path: str = "logs/session.jsonl"
+    # Marker our own staging target puts in a reply when a seeded rule fires. Only the Verifier's
+    # code check reads it; empty turns that check off. repr=False keeps it out of printed settings.
+    staging_target_canary: str = field(default="", repr=False)
 
 
 @lru_cache(maxsize=1)
@@ -42,4 +47,6 @@ def get_settings() -> Settings:
         ku_llm_base_url=_require("KU_LLM_BASE_URL"),
         ku_llm_model=os.getenv("KU_LLM_MODEL", "claude-opus-5").strip(),
         staging_target_url=os.getenv("STAGING_TARGET_URL", "").strip(),
+        log_path=os.getenv("LOG_PATH", "").strip() or "logs/session.jsonl",
+        staging_target_canary=os.getenv("STAGING_TARGET_CANARY", "").strip(),
     )
