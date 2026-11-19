@@ -13,6 +13,8 @@ the verifier, and its `code_checks` method (if any) is used as code_checks.
 Target client, Logger and Budget are wired here.
 
 Per attempt: kill/budget check -> build request -> send (Target client) -> verify -> log verdict.
+A planner with a feedback(seed_id, mutations, verdict) method (e.g. LLMPlanner) is given each
+verdict before it proposes the next attempt; a plain iterable planner (RulePlanner) is unaffected.
 The session stops on: planner exhausted, budget limit or kill switch (Budget records
 budget_stop / kill), or any log write failure (CLAUDE.md §4). One session = one new log file.
 
@@ -59,6 +61,21 @@ def stub_verifier(vin: VerifierInput) -> VerifierOutput:
     )
 
 
+# --- CHANGE 1 of 3: step a planner one attempt at a time -------------------------------
+# A feedback planner (LLMPlanner) chooses the next attempt from past verdicts, so it must be
+# pulled one at a time via plan_next(); a plain iterable planner (RulePlanner) is listed once
+# and indexed. Either way run_session gets one (seed, chain) per call, or None when done.
+def _next_attempt(planner, i: int):
+    if hasattr(planner, "plan_next"):              # LLMPlanner: ask for the next, given history so far
+        return planner.plan_next(f"a-{i:04d}")
+    seq = getattr(planner, "_run_session_list", None)
+    if seq is None:
+        seq = list(planner)                        # RulePlanner / any iterable: expand once
+        planner._run_session_list = seq
+    return seq[i] if i < len(seq) else None
+# ---------------------------------------------------------------------------------------
+
+
 @dataclass
 class SessionResult:
     log_path: Path
@@ -96,7 +113,14 @@ def run_session(
         if make_verifier is not None:  # built here so a model judge shares this session's Budget and Logger
             verifier = make_verifier(budget, log.log_event)
             code_checks = getattr(verifier, "code_checks", code_checks)
-        for i, (seed, chain) in enumerate(planner):
+        # --- CHANGE 2 of 3: drive the planner one step at a time (was: for i, (seed, chain) in enumerate(planner))
+        i = 0
+        while True:
+            step = _next_attempt(planner, i)
+            if step is None:
+                break
+            seed, chain = step
+            # -------------------------------------------------------------------------------
             budget.check()  # kill switch / time / cost before doing any work for this attempt
             req = build(seed, chain, f"a-{i:04d}")
             result.attempts += 1
@@ -107,6 +131,7 @@ def run_session(
                 result.stop_reason = resp.error
                 break
             if resp.error:  # blocked_path / timeout / http_error: recorded, nothing to verify
+                i += 1
                 continue
             vin = VerifierInput(
                 attempt_id=req.attempt_id,
@@ -117,6 +142,10 @@ def run_session(
             )
             out = verifier(vin)
             result.verdicts[out.verdict] += 1
+            # --- CHANGE 3 of 3: give the verdict back to a feedback planner (LLMPlanner) ---
+            if hasattr(planner, "feedback"):
+                planner.feedback(seed["seed_id"], chain, out.verdict)
+            # -------------------------------------------------------------------------------
             log.log_event(
                 "verdict",
                 "verifier",
@@ -131,6 +160,7 @@ def run_session(
                                     "refusal_matched": vin.code_checks.refusal_matched},
                 },
             )
+            i += 1
     except BudgetStop as e:  # Budget already recorded kill / budget_stop
         result.stop_reason = e.reason
     except LogWriteError as e:
