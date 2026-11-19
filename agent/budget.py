@@ -14,8 +14,9 @@ MAX_SESSION_SECONDS = 30 * 60
 MAX_SESSION_COST_USD = 5.0
 
 # --- Model prices, USD per million tokens.
-# Anthropic's published claude-opus-5 rates (platform.claude.com, $5 / $25 per 1M tokens,
-# read 2026-11). Overestimating cost only trips the USD 5 cap earlier, never later.
+# Anthropic's published rates for claude-opus-4-8, the default model (platform.claude.com,
+# $5 / $25 per 1M tokens, read 2026-11; claude-opus-5 has the same rates). Check these
+# when KU_LLM_MODEL changes. Overestimating cost only trips the USD 5 cap earlier, never later.
 PRICE_INPUT_USD_PER_MTOK: Optional[float] = 5.0    # USD per 1M input tokens
 PRICE_OUTPUT_USD_PER_MTOK: Optional[float] = 25.0  # USD per 1M output tokens
 
