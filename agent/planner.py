@@ -27,6 +27,15 @@ PROMPT_PATH = Path("prompts/planner.md")
 MAX_ATTEMPTS_PER_RUN = 50
 
 
+class PlannerRefused(RuntimeError):
+    """The planner model declined to plan (stop_reason=refusal).
+
+    Not turned into a default attempt: that attempt would not be the model's choice and would
+    skew the LLMPlanner-vs-baseline comparison. run_session ends the session with
+    "planner_failed: PlannerRefused"; the refused model_response is already in the session log.
+    """
+
+
 def load_prompt(path: Path = PROMPT_PATH) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -62,6 +71,7 @@ class LLMPlanner:
     The runner calls feedback(verdict) after each attempt (run_session can be adapted to,
     or use via plan_next directly). Kept simple and model-agnostic: the LLM returns JSON
     {"seed_id","mutations","rationale"}; unknown seeds or rules fall back to a safe default.
+    A refused call (stop_reason=refusal) raises PlannerRefused instead of falling back.
     """
     seeds: list[dict]
     llm: _Completer
@@ -95,6 +105,8 @@ class LLMPlanner:
             "planner", self.system_prompt, [{"role": "user", "content": user}],
             attempt_id=attempt_id, max_tokens=256, temperature=1.0,
         )
+        if getattr(result, "stop_reason", None) == "refusal":
+            raise PlannerRefused(f"planner model refused at {attempt_id}")
         seed, chain = self._parse(getattr(result, "text", ""))
         self._made += 1
         return seed, chain
