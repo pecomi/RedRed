@@ -45,7 +45,7 @@ def get_settings() -> Settings:
     return Settings(
         ku_llm_api_key=_require("KU_LLM_API_KEY"),
         ku_llm_base_url=_require("KU_LLM_BASE_URL"),
-        ku_llm_model=os.getenv("KU_LLM_MODEL", "claude-opus-5").strip(),
+        ku_llm_model=os.getenv("KU_LLM_MODEL", "claude-opus-4-8").strip(),
         staging_target_url=os.getenv("STAGING_TARGET_URL", "").strip(),
         log_path=os.getenv("LOG_PATH", "").strip() or "logs/session.jsonl",
         staging_target_canary=os.getenv("STAGING_TARGET_CANARY", "").strip(),
