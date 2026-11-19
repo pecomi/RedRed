@@ -94,6 +94,8 @@ docker compose up --build          # sandbox + Squid + staging target
 pytest -m "not live"               # offline tests (default)
 docker compose exec agent python -m pytest -p no:cacheprovider   # same, in Linux (agent.logger needs fcntl; use on Windows)
 pytest -m live                     # live calls: a human must confirm before running
+docker compose exec agent python -m agent.run_session --max-attempts 3                 # one session, RulePlanner (no model spend)
+docker compose exec agent python -m agent.run_session --planner llm --max-attempts 3   # LLMPlanner: live BAZE calls, a human confirms first
 python scripts/count_egress.py     # reached / denied counts
 ```
 
