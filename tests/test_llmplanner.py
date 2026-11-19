@@ -52,3 +52,16 @@ def test_cap_stops_iteration():
     llm = FakeLLM(['{"seed_id":"advbench-0000","mutations":["plain"]}']*10)
     p = LLMPlanner(SEEDS, llm, max_attempts=3)
     assert len(list(p)) == 3 and llm.calls == 3
+
+def test_refused_call_raises_instead_of_default_attempt():
+    import pytest
+    from types import SimpleNamespace
+    from agent.planner import PlannerRefused
+
+    class RefusingLLM:
+        def complete(self, role, system, messages, **kw):
+            return SimpleNamespace(text="", stop_reason="refusal")
+
+    p = LLMPlanner(SEEDS, RefusingLLM(), max_attempts=3)
+    with pytest.raises(PlannerRefused):
+        p.plan_next("a-0000")
