@@ -80,7 +80,9 @@ def test_kill_switch_mid_session_stops_with_zero_further_requests(tmp_path):
 def test_budget_limit_stops_session(tmp_path, monkeypatch):
     monkeypatch.setattr(budget_mod, "MAX_TARGET_REQUESTS_PER_SESSION", 2)
     r, records, received = run(tmp_path, n=5)
-    assert r.stop_reason == "budget_exceeded" and r.sent == len(received) == 2
+    # the Budget's own reason, not the generic client error "budget_exceeded"
+    assert r.stop_reason == "session request limit" and r.sent == len(received) == 2
+    assert r.errors == {"budget_exceeded": 1}
     assert "budget_stop" in types(records)
 
 

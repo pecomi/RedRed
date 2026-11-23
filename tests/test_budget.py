@@ -80,3 +80,36 @@ def test_cost_refuses_without_prices(monkeypatch):
     monkeypatch.setattr(b, "PRICE_INPUT_USD_PER_MTOK", None)
     with pytest.raises(RuntimeError):
         b.cost_usd(10, 10)
+
+
+def test_kill_during_rate_wait_stops_within_one_step(tmp_path):
+    """The kill file is checked while waiting for the rate window, not only after the wait."""
+    bud, ft, events = make(tmp_path)
+    for _ in range(b.MAX_TARGET_REQUESTS_PER_MIN):
+        bud.acquire_target_request()
+    steps = []
+
+    def sleep(s):
+        steps.append(s)
+        ft.t += s
+        if len(steps) == 3:  # the supervisor creates the kill file ~3 s into the wait
+            (tmp_path / "KILL").touch()
+
+    bud.sleep = sleep
+    with pytest.raises(b.BudgetStop, match="kill switch"):
+        bud.acquire_target_request()
+    assert all(s <= b.WAIT_STEP_SECONDS for s in steps)
+    assert ft.t <= 3 * b.WAIT_STEP_SECONDS + 1e-9  # stopped right after the step that saw the file
+    assert [e[0] for e in events] == ["kill"]
+    assert bud.target_requests == b.MAX_TARGET_REQUESTS_PER_MIN  # the 11th request was not counted
+
+
+def test_rate_wait_is_split_into_short_steps(tmp_path):
+    bud, ft, events = make(tmp_path)
+    for _ in range(b.MAX_TARGET_REQUESTS_PER_MIN):
+        bud.acquire_target_request()
+    steps = []
+    bud.sleep = lambda s: (steps.append(s), setattr(ft, "t", ft.t + s))
+    bud.acquire_target_request()
+    assert ft.t >= 60 and len(steps) >= 60
+    assert all(s <= b.WAIT_STEP_SECONDS for s in steps)

@@ -22,6 +22,8 @@ PRICE_OUTPUT_USD_PER_MTOK: Optional[float] = 25.0  # USD per 1M output tokens
 
 # --- Kill switch: the supervisor stops a running session by creating this file.
 KILL_FILE = Path("logs/KILL")
+# While waiting for the per-minute rate window, the kill file is checked at least this often.
+WAIT_STEP_SECONDS = 1.0
 
 # Logger interface agreed at kickoff: log_event(type, actor, data)
 LogEvent = Callable[[str, str, dict], None]
@@ -90,8 +92,7 @@ class Budget:
             self._stop("budget_stop", "session request limit")
         self._drop_old()
         if len(self._recent) >= MAX_TARGET_REQUESTS_PER_MIN:
-            self.sleep(60 - (self.clock() - self._recent[0]))
-            self.check()  # time may have run out while waiting
+            self._wait_until(self._recent[0] + 60)
             self._drop_old()
         self._recent.append(self.clock())
         self.target_requests += 1
@@ -102,6 +103,17 @@ class Budget:
     def kill(self, reason: str = "manual") -> None:
         """Mark the session as killed. The next check() raises BudgetStop."""
         self._mark("kill", reason)
+
+    def _wait_until(self, deadline: float) -> None:
+        """Wait for the rate window in steps of at most WAIT_STEP_SECONDS, calling check() before
+        each step, so the kill switch (or the time limit) ends the session within one step
+        instead of after the whole wait."""
+        while True:
+            self.check()
+            remaining = deadline - self.clock()
+            if remaining <= 0:
+                return
+            self.sleep(min(WAIT_STEP_SECONDS, remaining))
 
     def _drop_old(self) -> None:
         now = self.clock()
