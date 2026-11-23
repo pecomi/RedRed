@@ -148,7 +148,9 @@ def run_session(
             if resp.error:
                 result.errors[resp.error] += 1
             if resp.error in ("budget_exceeded", "log_failed"):
-                result.stop_reason = resp.error
+                # Budget knows why it stopped ("kill switch file present", "session time limit", ...):
+                # report that, the same reason the BudgetStop path below reports.
+                result.stop_reason = (budget.stopped or resp.error) if resp.error == "budget_exceeded" else resp.error
                 break
             if resp.error:  # blocked_path / timeout / http_error: recorded, nothing to verify
                 i += 1
