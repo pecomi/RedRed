@@ -26,3 +26,6 @@ logs/
 
 # --- Staging target: seeded vulnerability rules and canary (never commit) ---
 staging_target/secrets/
+
+# --- Claude Code instructions: kept locally, not in the repo ---
+CLAUDE.md
