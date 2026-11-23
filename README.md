@@ -6,6 +6,10 @@ An LLM-driven autonomous red-team agent (Secure AI Systems 2026-2, Track C). It 
 
 ## Architecture
 
+![Architecture: Planner, Attack generator, Verifier, Target client and Logger inside the sandbox; egress policy and budget / kill switch outside](docs/architecture.png)
+
+The diagram is the design from our proposal. In the mid-check slice the target is our own staging target instead of the partner system, the Attack generator uses the mutation rules only, and the default model is `claude-opus-4-8`.
+
 | Box | Files |
 | --- | --- |
 | Planner | `agent/planner.py`, `prompts/planner.md` |
